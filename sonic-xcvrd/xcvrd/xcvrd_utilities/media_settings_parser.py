@@ -371,6 +371,8 @@ def notify_media_setting(logical_port_name, transceiver_dict,
 
         if len(media_dict) == 0:
             helper_logger.log_info("Error in obtaining media setting for {}".format(logical_port_name))
+            # Mark NOTIFIED so PortsOrch (swss) can bring port admin up even without media settings
+            xcvr_table_helper.get_state_port_tbl(asic_index).set(logical_port_name, [(NPU_SI_SETTINGS_SYNC_STATUS_KEY, NPU_SI_SETTINGS_NOTIFIED_VALUE)])
             return
 
         fvs = swsscommon.FieldValuePairs(len(media_dict))
