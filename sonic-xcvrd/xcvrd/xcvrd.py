@@ -352,6 +352,35 @@ class SfpStateUpdateTask(threading.Thread):
 
         return retry_eeprom_set
 
+    def _ensure_npu_si_settings_sync_status_notified(self, port_mapping, xcvr_table_helper):
+        """
+        Set NPU_SI_SETTINGS_SYNC_STATUS to NOTIFIED for ports that still have DEFAULT.
+        Ports with media settings already got NOTIFIED from notify_media_setting(); ports
+        without media settings (or EEPROM not ready) stay DEFAULT. This method marks those
+        as NOTIFIED so PortsOrch (swss) does not block admin up. Result: after
+        this runs, every port has NOTIFIED in STATE_DB and swss can set admin up for all.
+        """
+        logical_port_list = port_mapping.logical_port_list
+        for logical_port_name in logical_port_list:
+            asic_index = port_mapping.get_asic_id_for_logical_port(logical_port_name)
+            if asic_index is None:
+                continue
+            state_port_table = xcvr_table_helper.get_state_port_tbl(asic_index)
+            if state_port_table is None:
+                continue
+            found, state_port_table_fvs = state_port_table.get(logical_port_name)
+            if not found:
+                continue
+            state_port_table_fvs_dict = dict(state_port_table_fvs)
+            current = state_port_table_fvs_dict.get(NPU_SI_SETTINGS_SYNC_STATUS_KEY)
+            if current == NPU_SI_SETTINGS_DEFAULT_VALUE:
+                state_port_table.set(logical_port_name, [(NPU_SI_SETTINGS_SYNC_STATUS_KEY,
+                                                          NPU_SI_SETTINGS_NOTIFIED_VALUE)])
+                helper_logger.log_notice(
+                    "Port init: Set NPU_SI_SETTINGS_SYNC_STATUS to NOTIFIED for lport %s (no media settings)",
+                    logical_port_name
+                )
+
     # Init TRANSCEIVER_STATUS_SW table
     def _init_port_sfp_status_sw_tbl(self, port_mapping, xcvr_table_helper, stop_event=threading.Event()):
         # Init TRANSCEIVER_STATUS_SW table
@@ -386,6 +415,9 @@ class SfpStateUpdateTask(threading.Thread):
         # Post all the current interface sfp/dom threshold info to STATE_DB
         self.retry_eeprom_set = self._post_port_sfp_info_and_dom_thr_to_db_once(port_mapping_data, self.xcvr_table_helper, self.main_thread_stop_event)
         helper_logger.log_notice("SfpStateUpdateTask: Posted all port DOM/SFP info to DB")
+
+        # Ensure ports without media settings are marked NOTIFIED so swss can set admin up
+        self._ensure_npu_si_settings_sync_status_notified(port_mapping_data, self.xcvr_table_helper)
 
         # Init port sfp status sw table
         self._init_port_sfp_status_sw_tbl(port_mapping_data, self.xcvr_table_helper, self.main_thread_stop_event)
