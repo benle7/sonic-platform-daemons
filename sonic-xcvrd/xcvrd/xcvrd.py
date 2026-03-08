@@ -176,14 +176,20 @@ def _wrapper_get_sfp_error_description(physical_port):
 
 
 def post_port_sfp_info_to_db(logical_port_name, port_mapping, table, transceiver_dict,
-                             stop_event=threading.Event()):
+                             stop_event=threading.Event(), write_to_db=True):
+    """
+    Read transceiver info, optionally write TRANSCEIVER_INFO to STATE_DB.
+    When write_to_db=False, returns (rc, writes) so caller can write SI to APP_DB first,
+    then apply writes to guarantee SI is in APP_DB before PortsOrch sees TRANSCEIVER_INFO.
+    """
     ganged_port = False
     ganged_member_num = 1
+    writes = []
 
     physical_port_list = port_mapping.logical_port_name_to_physical_port_list(logical_port_name)
     if physical_port_list is None:
         helper_logger.log_error("No physical ports found for logical port '{}'".format(logical_port_name))
-        return PHYSICAL_PORT_NOT_EXIST
+        return (PHYSICAL_PORT_NOT_EXIST, [])
 
     if len(physical_port_list) > 1:
         ganged_port = True
@@ -237,13 +243,18 @@ def post_port_sfp_info_to_db(logical_port_name, port_mapping, table, transceiver
                         ('dom_capability', port_info_dict['dom_capability']
                         if 'dom_capability' in port_info_dict else 'N/A')
                     ])
-                table.set(port_name, fvs)
+                if write_to_db:
+                    table.set(port_name, fvs)
+                else:
+                    writes.append((port_name, fvs))
             else:
-                return SFP_EEPROM_NOT_READY
+                return (SFP_EEPROM_NOT_READY, [])
 
         except NotImplementedError:
             helper_logger.log_error("This functionality is currently not implemented for this platform")
             sys.exit(NOT_IMPLEMENTED_ERROR)
+
+    return (None, writes)
 
 def waiting_time_compensation_with_sleep(time_start, time_to_wait):
     time_now = time.time()
@@ -332,10 +343,13 @@ class SfpStateUpdateTask(threading.Thread):
             namespace = common.get_namespace_from_asic_id(asic_index)
             is_warm_start = warm_start_status.get(namespace, False)
 
-            rc = post_port_sfp_info_to_db(logical_port_name, port_mapping, xcvr_table_helper.get_intf_tbl(asic_index), transceiver_dict, stop_event)
+            intf_tbl = xcvr_table_helper.get_intf_tbl(asic_index)
+            rc, writes = post_port_sfp_info_to_db(logical_port_name, port_mapping, intf_tbl, transceiver_dict, stop_event, write_to_db=False)
             if rc != SFP_EEPROM_NOT_READY:
                 if is_warm_start == False:
                     media_settings_parser.notify_media_setting(logical_port_name, transceiver_dict, xcvr_table_helper, port_mapping)
+                for port_name, fvs in writes:
+                    intf_tbl.set(port_name, fvs)
             else:
                 retry_eeprom_set.add(logical_port_name)
         
@@ -554,12 +568,13 @@ class SfpStateUpdateTask(threading.Thread):
                                 common.update_port_transceiver_status_table_sw(
                                     logical_port, self.xcvr_table_helper.get_status_sw_tbl(asic_index), sfp_status_helper.SFP_STATUS_INSERTED)
                                 helper_logger.log_notice("{}: received plug in and update port sfp status table.".format(logical_port))
-                                rc = post_port_sfp_info_to_db(logical_port, self.port_mapping, self.xcvr_table_helper.get_intf_tbl(asic_index), transceiver_dict)
+                                intf_tbl = self.xcvr_table_helper.get_intf_tbl(asic_index)
+                                rc, writes = post_port_sfp_info_to_db(logical_port, self.port_mapping, intf_tbl, transceiver_dict, write_to_db=False)
                                 # If we didn't get the sfp info, assuming the eeprom is not ready, give a try again.
                                 if rc == SFP_EEPROM_NOT_READY:
                                     helper_logger.log_warning("{}: SFP EEPROM is not ready. One more try...".format(logical_port))
                                     time.sleep(TIME_FOR_SFP_READY_SECS)
-                                    rc = post_port_sfp_info_to_db(logical_port, self.port_mapping, self.xcvr_table_helper.get_intf_tbl(asic_index), transceiver_dict)
+                                    rc, writes = post_port_sfp_info_to_db(logical_port, self.port_mapping, intf_tbl, transceiver_dict, write_to_db=False)
                                     if rc == SFP_EEPROM_NOT_READY:
                                         # If still failed to read EEPROM, put it to retry set
                                         self.retry_eeprom_set.add(logical_port)
@@ -569,6 +584,8 @@ class SfpStateUpdateTask(threading.Thread):
                                     self.vdm_db_utils.post_port_vdm_thresholds_to_db(logical_port)
 
                                     media_settings_parser.notify_media_setting(logical_port, transceiver_dict, self.xcvr_table_helper, self.port_mapping)
+                                    for port_name, fvs in writes:
+                                        intf_tbl.set(port_name, fvs)
                                     transceiver_dict.clear()
                             elif value == sfp_status_helper.SFP_STATUS_REMOVED:
                                 # Remove the SFP API object for this physical port
@@ -821,7 +838,7 @@ class SfpStateUpdateTask(threading.Thread):
         if common._wrapper_get_presence(port_change_event.port_index) and read_eeprom:
             transceiver_dict = {}
             status = sfp_status_helper.SFP_STATUS_INSERTED if not status else status
-            rc = post_port_sfp_info_to_db(port_change_event.port_name, self.port_mapping, int_tbl, transceiver_dict)
+            rc, writes = post_port_sfp_info_to_db(port_change_event.port_name, self.port_mapping, int_tbl, transceiver_dict, write_to_db=False)
             if rc == SFP_EEPROM_NOT_READY:
                 # Failed to read EEPROM, put it to retry set
                 self.retry_eeprom_set.add(port_change_event.port_name)
@@ -829,6 +846,8 @@ class SfpStateUpdateTask(threading.Thread):
                 self.dom_db_utils.post_port_dom_thresholds_to_db(port_change_event.port_name)
                 self.vdm_db_utils.post_port_vdm_thresholds_to_db(port_change_event.port_name)
                 media_settings_parser.notify_media_setting(port_change_event.port_name, transceiver_dict, self.xcvr_table_helper, self.port_mapping)
+                for port_name, fvs in writes:
+                    int_tbl.set(port_name, fvs)
         else:
             status = sfp_status_helper.SFP_STATUS_REMOVED if not status else status
         common.update_port_transceiver_status_table_sw(port_change_event.port_name, status_sw_tbl, status, error_description)
@@ -851,12 +870,15 @@ class SfpStateUpdateTask(threading.Thread):
         retry_success_set = set()
         for logical_port in self.retry_eeprom_set:
             asic_index = self.port_mapping.get_asic_id_for_logical_port(logical_port)
-            rc = post_port_sfp_info_to_db(logical_port, self.port_mapping, self.xcvr_table_helper.get_intf_tbl(asic_index), transceiver_dict)
+            intf_tbl = self.xcvr_table_helper.get_intf_tbl(asic_index)
+            rc, writes = post_port_sfp_info_to_db(logical_port, self.port_mapping, intf_tbl, transceiver_dict, write_to_db=False)
             if rc != SFP_EEPROM_NOT_READY:
                 self.dom_db_utils.post_port_dom_thresholds_to_db(logical_port)
                 self.vdm_db_utils.post_port_vdm_thresholds_to_db(logical_port)
 
                 media_settings_parser.notify_media_setting(logical_port, transceiver_dict, self.xcvr_table_helper, self.port_mapping)
+                for port_name, fvs in writes:
+                    intf_tbl.set(port_name, fvs)
                 transceiver_dict.clear()
                 retry_success_set.add(logical_port)
         # Update retry EEPROM set
