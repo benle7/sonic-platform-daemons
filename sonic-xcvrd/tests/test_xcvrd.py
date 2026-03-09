@@ -4734,12 +4734,12 @@ class TestXcvrdScript(object):
         assert mock_post_sfp_info.call_count == 0
 
         task.last_retry_eeprom_time = 0
-        mock_post_sfp_info.return_value = SFP_EEPROM_NOT_READY
+        mock_post_sfp_info.return_value = (SFP_EEPROM_NOT_READY, [])
         task.retry_eeprom_reading()
         assert 'Ethernet0' in task.retry_eeprom_set
 
         task.last_retry_eeprom_time = 0
-        mock_post_sfp_info.return_value = None
+        mock_post_sfp_info.return_value = (None, [])
         task.retry_eeprom_reading()
         assert 'Ethernet0' not in task.retry_eeprom_set
 
@@ -4826,7 +4826,7 @@ class TestXcvrdScript(object):
         mock_change_event.return_value = (True, {1: SFP_STATUS_INSERTED}, {})
         mock_mapping_event.side_effect = None
         mock_mapping_event.return_value = NORMAL_EVENT
-        mock_post_sfp_info.return_value = SFP_EEPROM_NOT_READY
+        mock_post_sfp_info.return_value = (SFP_EEPROM_NOT_READY, [])
         stop_event.is_set = MagicMock(side_effect=[False, True])
         # Test state machine: handle SFP insert event, but EEPROM read failure
         task.task_worker(stop_event, sfp_error_event)
@@ -4840,7 +4840,7 @@ class TestXcvrdScript(object):
         task.retry_eeprom_set.clear()
 
         stop_event.is_set = MagicMock(side_effect=[False, True])
-        mock_post_sfp_info.return_value = None
+        mock_post_sfp_info.return_value = (None, [])
         mock_update_status.reset_mock()
         mock_post_sfp_info.reset_mock()
         # Test state machine: handle SFP insert event, and EEPROM read success
@@ -4914,20 +4914,20 @@ class TestXcvrdScript(object):
 
         status_sw_tbl.get.return_value = (False, ())
         mock_get_presence.return_value = True
-        mock_post_sfp_info.return_value = SFP_EEPROM_NOT_READY
+        mock_post_sfp_info.return_value = (SFP_EEPROM_NOT_READY, [])
         # SFP information is not in the DB, and SFP is present, and SFP has no error, but SFP EEPROM reading failed
         task.on_add_logical_port(port_change_event)
         assert mock_update_status.call_count == 1
         mock_update_status.assert_called_with('Ethernet0', status_sw_tbl, SFP_STATUS_INSERTED, 'N/A')
         assert mock_post_sfp_info.call_count == 1
-        mock_post_sfp_info.assert_called_with('Ethernet0', task.port_mapping, int_tbl, {})
+        mock_post_sfp_info.assert_called_with('Ethernet0', task.port_mapping, int_tbl, {}, write_to_db=False)
         assert task.dom_db_utils.post_port_dom_thresholds_to_db.call_count == 0
         assert task.vdm_db_utils.post_port_vdm_thresholds_to_db.call_count == 0
         assert mock_update_media_setting.call_count == 0
         assert 'Ethernet0' in task.retry_eeprom_set
         task.retry_eeprom_set.clear()
 
-        mock_post_sfp_info.return_value = None
+        mock_post_sfp_info.return_value = (None, [])
         mock_update_status.reset_mock()
         mock_post_sfp_info.reset_mock()
         # SFP information is not in the DB, and SFP is present, and SFP has no error, and SFP EEPROM reading succeed
@@ -4935,7 +4935,7 @@ class TestXcvrdScript(object):
         assert mock_update_status.call_count == 1
         mock_update_status.assert_called_with('Ethernet0', status_sw_tbl, SFP_STATUS_INSERTED, 'N/A')
         assert mock_post_sfp_info.call_count == 1
-        mock_post_sfp_info.assert_called_with('Ethernet0', task.port_mapping, int_tbl, {})
+        mock_post_sfp_info.assert_called_with('Ethernet0', task.port_mapping, int_tbl, {}, write_to_db=False)
         assert task.dom_db_utils.post_port_dom_thresholds_to_db.call_count == 1
         assert task.vdm_db_utils.post_port_vdm_thresholds_to_db.call_count == 1
         task.dom_db_utils.post_port_dom_thresholds_to_db.assert_called_with('Ethernet0')
@@ -5706,7 +5706,7 @@ class TestXcvrdScript(object):
         mock_change_event.return_value = (True, {1: SFP_STATUS_INSERTED}, {})
         mock_mapping_event.side_effect = None
         mock_mapping_event.return_value = NORMAL_EVENT
-        mock_post_sfp_info.return_value = SFP_EEPROM_NOT_READY
+        mock_post_sfp_info.return_value = (SFP_EEPROM_NOT_READY, [])
         stop_event.is_set = MagicMock(side_effect=[False, True])
         # Test state machine: handle SFP insert event, but EEPROM read failure
         task.task_worker(stop_event, sfp_error_event)
@@ -5720,7 +5720,7 @@ class TestXcvrdScript(object):
         task.retry_eeprom_set.clear()
 
         stop_event.is_set = MagicMock(side_effect=[False, True])
-        mock_post_sfp_info.return_value = None
+        mock_post_sfp_info.return_value = (None, [])
         mock_update_status.reset_mock()
         mock_post_sfp_info.reset_mock()
         # Test state machine: handle SFP insert event, and EEPROM read success
