@@ -334,8 +334,10 @@ def notify_media_setting(logical_port_name, transceiver_dict,
 
     if not media_settings_present():
         helper_logger.log_info("Media settings not present for lport {}".format(logical_port_name))
-        # Mark NOTIFIED so PortsOrch (swss) can bring port admin up even without media settings
-        xcvr_table_helper.get_state_port_tbl(asic_index).set(logical_port_name, [(NPU_SI_SETTINGS_SYNC_STATUS_KEY, NPU_SI_SETTINGS_NOTIFIED_VALUE)])
+        if asic_index is not None:
+            # Mark NOTIFIED so PortsOrch (swss) can bring port admin up even without media settings
+            helper_logger.log_info("Marking NOTIFIED for lport {}".format(logical_port_name))
+            xcvr_table_helper.get_state_port_tbl(asic_index).set(logical_port_name, [(NPU_SI_SETTINGS_SYNC_STATUS_KEY, NPU_SI_SETTINGS_NOTIFIED_VALUE)])
         return
 
     if not xcvr_table_helper.is_npu_si_settings_update_required(logical_port_name, port_mapping):
@@ -374,8 +376,10 @@ def notify_media_setting(logical_port_name, transceiver_dict,
 
         if len(media_dict) == 0:
             helper_logger.log_info("Error in obtaining media setting for {}".format(logical_port_name))
-            # Mark NOTIFIED so PortsOrch (swss) can bring port admin up even without media settings
-            xcvr_table_helper.get_state_port_tbl(asic_index).set(logical_port_name, [(NPU_SI_SETTINGS_SYNC_STATUS_KEY, NPU_SI_SETTINGS_NOTIFIED_VALUE)])
+            if asic_index is not None:
+                # Mark NOTIFIED so PortsOrch (swss) can bring port admin up even without media settings
+                helper_logger.log_info("Marking NOTIFIED for lport {}".format(logical_port_name))
+                xcvr_table_helper.get_state_port_tbl(asic_index).set(logical_port_name, [(NPU_SI_SETTINGS_SYNC_STATUS_KEY, NPU_SI_SETTINGS_NOTIFIED_VALUE)])
             return
 
         fvs = swsscommon.FieldValuePairs(len(media_dict))
